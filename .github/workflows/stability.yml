@@ -1,0 +1,68 @@
+# $schema: https://json.schemastore.org/github-workflow.json
+name: stability
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  dependency-report:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: gradle/actions/dependency-submission@v4
+        with:
+          gradle-version: wrapper
+          dependency-resolution-task: 'resolveAllDependencies'
+          validate-wrappers: true
+
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - name: run unit test
+        shell: bash
+        run: |
+          ./gradlew testDebugUnitTest
+      - uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: unit-test-result
+          path: '**/test-results/**/*.xml'
+          reporter: java-junit
+          fail-on-error: false
+
+  android-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - name: run android test
+        uses: ./.github/actions/avd
+        with:
+          prepare-script: ./gradlew assembleDebug assembleDebugAndroidTest
+          script: ./gradlew connectedDebugAndroidTest
+      - uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: android-test-result
+          path: '**/outputs/androidTest-results/connected/**/*.xml'
+          reporter: java-junit
+          fail-on-error: false

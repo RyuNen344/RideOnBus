@@ -1,0 +1,145 @@
+# $schema: https://json.schemastore.org/github-workflow.json
+name: check
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  checks: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - uses: reviewdog/action-setup@v1
+      - name: run android lint
+        shell: bash
+        run: |
+          ./gradlew :app:lintDebug
+      - name: run detekt
+        shell: bash
+        run: |
+          ./gradlew detekt
+      - name: run reviewdog review
+        if: ${{ !cancelled() }}
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cat app/build/reports/lint-results-debug.sarif | reviewdog -f=sarif -name="android lint" -reporter=github-pr-review;
+          cat build/reports/detekt/detekt.xml | reviewdog -f=checkstyle -name="detekt" -reporter=github-pr-review;
+      - name: run reviewdog suggest
+        if: ${{ !cancelled() }}
+        env:
+          REVIEWDOG_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./gradlew lintFix detekt -PautoCorrect --quiet --continue || true;
+          TMPFILE=$(mktemp);
+          git diff >"${TMPFILE}";
+          git stash -u || git stash drop;
+          cat "${TMPFILE}" | reviewdog -f=diff -f.diff.strip=1 -reporter=github-pr-review;
+
+  unit-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - name: run unit test
+        shell: bash
+        run: |
+          ./gradlew testDebugUnitTest
+      - uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: unit-test-result
+          path: '**/test-results/**/*.xml'
+          reporter: java-junit
+          fail-on-error: false
+      - name: zip coverage data
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          chmod +x ./scripts/zip-build-data.sh && ./scripts/zip-build-data.sh;
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: unit-test-artifact
+          retention-days: 1
+          path: artifact.zip
+
+  android-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - name: run android test
+        uses: ./.github/actions/avd
+        with:
+          prepare-script: ./gradlew assembleDebug assembleDebugAndroidTest
+          script: ./gradlew connectedDebugAndroidTest
+      - uses: dorny/test-reporter@v2
+        if: ${{ !cancelled() }}
+        with:
+          name: android-test-result
+          path: '**/outputs/androidTest-results/connected/**/*.xml'
+          reporter: java-junit
+          fail-on-error: false
+      - name: zip coverage data
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          chmod +x ./scripts/zip-build-data.sh && ./scripts/zip-build-data.sh;
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: android-test-artifact
+          retention-days: 1
+          path: artifact.zip
+
+  coverage:
+    runs-on: ubuntu-latest
+    if: ${{ !cancelled() }}
+    needs:
+      - unit-test
+      - android-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/java
+      - uses: ./.github/actions/gradle
+      - uses: actions/download-artifact@v4
+      - name: restore data
+        shell: bash
+        run: |
+          unzip -o unit-test-artifact/artifact.zip
+          unzip -o android-test-artifact/artifact.zip
+          \cp -rf artifact/* .
+          rm -rf artifact
+      - name: run jacoco
+        shell: bash
+        run: |
+          ./gradlew jacocoReport
+      - uses: madrapps/jacoco-report@v1.7.2
+        with:
+          paths: |
+            ${{ github.workspace }}/app/build/reports/jacoco/jacocoReport/jacocoReport.xml
+          title: coverage report
+          update-comment: true
+          comment-type: both
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: 0
+          min-coverage-changed-files: 0

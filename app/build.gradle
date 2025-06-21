@@ -1,0 +1,302 @@
+import com.android.build.api.variant.DeviceTestBuilder
+import com.android.build.api.variant.HostTestBuilder
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
+plugins {
+    alias libs.plugins.com.android.application
+    alias libs.plugins.com.google.dagger.hilt
+    alias libs.plugins.com.google.devtools.ksp
+    alias libs.plugins.org.jetbrains.kotlin.android
+    alias libs.plugins.org.jetbrains.kotlin.plugin.compose
+    alias libs.plugins.org.jetbrains.kotlin.plugin.parcelize
+    alias libs.plugins.org.jetbrains.kotlin.plugin.serialization
+    alias libs.plugins.jacoco
+}
+
+apply from: rootProject.layout.projectDirectory.file("gradle/jacoco.gradle")
+
+def defaultExcludes = []
+def additionalExcludes = [
+    "/META-INF/{AL2.0,LGPL2.1}",
+    "**/NOTICE*",
+    "/META-INF/licenses/ASM",
+    "/META-INF/versions/**",
+    "**/LICENSE*",
+    "/LICENSE-junit.txt",
+    "/junit/**",
+    "DebugProbesKt.bin",
+]
+
+android {
+    namespace 'io.github.ryunen344.bus'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId "io.github.ryunen344.bus"
+        minSdk 21
+        targetSdk 35
+        versionCode 1
+        versionName "1.0.0"
+
+        testInstrumentationRunner "io.github.ryunen344.bus.test.dagger.DaggerTestRunner"
+        vectorDrawables {
+            useSupportLibrary true
+        }
+    }
+
+    buildFeatures {
+        buildConfig = true
+        compose = true
+    }
+
+    signingConfigs {
+        debug {
+            storeFile = rootProject.layout.projectDirectory.file("keystore/debug.keystore").asFile
+            storePassword = DEFAULT_PASSWORD
+            keyAlias = DEFAULT_ALIAS
+            keyPassword = DEFAULT_PASSWORD
+            enableV3Signing true
+            enableV4Signing true
+        }
+    }
+    buildTypes {
+        debug {
+            signingConfig = signingConfigs.debug
+        }
+
+        release {
+            signingConfig = signingConfigs.debug
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    defaultExcludes += packaging.resources.excludes
+
+    lint {
+        lintConfig rootProject.layout.projectDirectory.file(".lint/lint.xml").asFile
+        checkDependencies = true
+        checkGeneratedSources = false
+        checkReleaseBuilds = false
+        sarifReport = true
+    }
+
+    sourceSets {
+        def sharedTestDir = "src/sharedTest/java"
+        test {
+            java.srcDir sharedTestDir
+        }
+        androidTest {
+            java.srcDir sharedTestDir
+        }
+    }
+    adbOptions.timeOutInMs = 180000
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.returnDefaultValues = true
+        unitTests.all { test ->
+            test.systemProperty("robolectric.logging", "stdout")
+            test.systemProperty("robolectric.logging.enabled", "true")
+            test.systemProperty("robolectric.graphicsMode", "NATIVE")
+            test.testLogging.showStandardStreams = true
+        }
+    }
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility libs.versions.jdk.get()
+        targetCompatibility libs.versions.jdk.get()
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.fromTarget(libs.versions.jdk.get())
+        optIn = [
+            // compose animation
+            'androidx.compose.animation.core.ExperimentalAnimatableApi',
+            'androidx.compose.animation.core.ExperimentalAnimationSpecApi',
+            'androidx.compose.animation.core.ExperimentalTransitionApi',
+
+            // compose foundation
+            'androidx.compose.foundation.ExperimentalFoundationApi',
+            'androidx.compose.foundation.layout.ExperimentalLayoutApi',
+
+            // compose material
+            'androidx.compose.material3.ExperimentalMaterial3Api',
+            'androidx.compose.material.ExperimentalMaterialApi',
+
+            // compose runtime
+            'androidx.compose.runtime.ExperimentalComposeApi',
+            'androidx.compose.runtime.ExperimentalComposeRuntimeApi',
+
+            // compose ui
+            'androidx.compose.ui.graphics.ExperimentalGraphicsApi',
+            'androidx.compose.ui.test.ExperimentalTestApi',
+            'androidx.compose.ui.test.InternalTestApi',
+            'androidx.compose.ui.text.ExperimentalTextApi',
+            'androidx.compose.ui.unit.ExperimentalUnitApi',
+            'androidx.compose.ui.ExperimentalComposeUiApi',
+            'androidx.compose.ui.InternalComposeUiApi',
+
+            // kotlin
+            'kotlin.ExperimentalMultiplatform',
+            'kotlin.ExperimentalStdlibApi',
+            'kotlin.ExperimentalSubclassOptIn',
+            'kotlin.contracts.ExperimentalContracts',
+            'kotlin.io.encoding.ExperimentalEncodingApi',
+
+            // kotlinx
+            'kotlinx.coroutines.DelicateCoroutinesApi',
+            'kotlinx.coroutines.ExperimentalCoroutinesApi',
+            'kotlinx.coroutines.FlowPreview',
+            'kotlinx.coroutines.ObsoleteCoroutinesApi',
+            'kotlinx.coroutines.InternalCoroutinesApi',
+            'kotlinx.coroutines.ExperimentalForInheritanceCoroutinesApi',
+            'kotlinx.coroutines.InternalForInheritanceCoroutinesApi',
+
+            // kotlinx.serialization
+            'kotlinx.serialization.ExperimentalSerializationApi',
+            'kotlinx.serialization.InternalSerializationApi',
+
+            // ktor
+            'io.ktor.utils.io.InternalAPI',
+
+            // coil
+            'coil3.annotation.ExperimentalCoilApi',
+            'coil3.annotation.InternalCoilApi',
+        ]
+    }
+}
+
+androidComponents {
+    beforeVariants(selector()) { builder ->
+        def debug = builder.buildType == "debug"
+        builder.hostTests[HostTestBuilder.UNIT_TEST_TYPE].enable = debug
+        builder.hostTests[HostTestBuilder.UNIT_TEST_TYPE].enableCodeCoverage = debug
+        builder.hostTests[HostTestBuilder.SCREENSHOT_TEST_TYPE].enable = false
+        builder.deviceTests[DeviceTestBuilder.ANDROID_TEST_TYPE].enable = debug
+        builder.deviceTests[DeviceTestBuilder.ANDROID_TEST_TYPE].enableCodeCoverage = debug
+    }
+    onVariants(selector()) { variant ->
+        // resource
+        def excludes = defaultExcludes + additionalExcludes
+
+        // default apk
+        variant.packaging.resources.excludes.addAll(excludes)
+
+        // androidTest apk
+        variant.androidTest?.packaging?.resources?.excludes?.addAll(excludes)
+    }
+}
+
+composeCompiler {
+    metricsDestination = layout.buildDirectory.dir("compose_compiler")
+    reportsDestination = layout.buildDirectory.dir("compose_compiler")
+    stabilityConfigurationFiles = [
+        rootProject.layout.projectDirectory.file("stability_config.conf")
+    ]
+}
+
+dependencies {
+    implementation libs.androidx.activity.compose
+    implementation libs.androidx.appcompat
+    implementation libs.androidx.collection
+    implementation libs.androidx.compose.animation
+    implementation libs.androidx.compose.foundation
+    implementation libs.androidx.compose.ui
+    implementation libs.androidx.compose.ui.graphics
+    debugImplementation libs.androidx.compose.ui.tooling
+    implementation libs.androidx.compose.ui.tooling.preview
+    implementation libs.androidx.compose.material
+    implementation libs.androidx.compose.material3
+    implementation libs.androidx.compose.runtime
+    implementation libs.androidx.compose.runtime.tracing
+    implementation libs.androidx.core
+    implementation libs.androidx.core.splashscreen
+    implementation libs.androidx.emoji2
+    implementation libs.androidx.lifecycle.runtime
+    implementation libs.androidx.lifecycle.viewmodel
+    implementation libs.androidx.lifecycle.viewmodel.compose
+    implementation libs.androidx.lifecycle.process
+    implementation libs.androidx.navigation.compose
+    implementation libs.androidx.palette
+    implementation libs.androidx.startup.runtime
+    implementation libs.androidx.trace
+    implementation libs.androidx.webkit
+    implementation libs.androidx.hilt.navigation.compose
+    implementation libs.com.google.dagger.hilt.android
+    ksp libs.androidx.hilt.compiler
+    ksp libs.com.google.dagger.hilt.compiler
+    implementation libs.auto.mutton.recipe
+    implementation libs.auto.mutton.recipe.compose
+    implementation libs.auto.mutton.recipe.savedstate
+    implementation libs.com.squareup.okhttp
+    implementation libs.com.squareup.okhttp.logging
+    implementation libs.com.squareup.okio
+    coreLibraryDesugaring libs.desugar.jdk.libs
+    implementation libs.io.coil
+    implementation libs.io.coil.compose
+    implementation libs.io.coil.gif
+    implementation libs.io.coil.network.cache
+    implementation libs.io.coil.network.okhttp
+    implementation libs.io.coil.svg
+    implementation libs.io.coil.video
+    implementation libs.io.ktor.client.call.id
+    implementation libs.io.ktor.client.content.negotiation
+    implementation libs.io.ktor.client.core
+    implementation libs.io.ktor.client.okhttp
+    implementation libs.io.ktor.client.resources
+    implementation libs.io.ktor.serialization.kotlinx.json
+    implementation libs.org.jetbrains.kotlinx.atomicfu
+    implementation libs.org.jetbrains.kotlinx.coroutine.android
+    implementation libs.org.jetbrains.kotlinx.serialization.core
+    implementation libs.org.jetbrains.kotlinx.serialization.json
+    implementation libs.org.jetbrains.kotlinx.serialization.json.okio
+    implementation libs.timber
+
+    // test
+    testImplementation libs.junit
+    testImplementation libs.com.google.truth.truth
+    testImplementation libs.androidx.test.core
+    testImplementation libs.androidx.test.rules
+    testImplementation libs.androidx.test.runner
+    testImplementation libs.androidx.test.ext.junit
+    testImplementation libs.androidx.test.ext.truth
+    testImplementation libs.app.cash.turbine
+    testImplementation libs.com.google.dagger.hilt.android.test
+    testImplementation libs.com.squareup.okhttp.mockwebserver
+    testImplementation libs.com.willowtreeapps.assertk
+    testImplementation libs.io.mockk
+    testImplementation libs.io.mockk.agent
+    testImplementation libs.io.ktor.client.mock
+    testImplementation libs.org.jetbrains.kotlin.test
+    testImplementation libs.org.jetbrains.kotlin.reflect
+    testImplementation libs.org.jetbrains.kotlinx.coroutine.debug
+    testImplementation libs.org.jetbrains.kotlinx.coroutine.test
+    testImplementation libs.org.robolectric.robolectric
+
+    // androidTest
+    androidTestImplementation libs.junit
+    androidTestImplementation libs.com.google.truth.truth
+    androidTestImplementation libs.androidx.test.core
+    androidTestImplementation libs.androidx.test.rules
+    androidTestImplementation libs.androidx.test.runner
+    androidTestImplementation libs.androidx.test.ext.junit
+    androidTestImplementation libs.androidx.test.ext.truth
+    androidTestImplementation libs.app.cash.turbine
+    androidTestImplementation libs.com.google.dagger.hilt.android.test
+    androidTestImplementation libs.com.squareup.okhttp.mockwebserver
+    androidTestImplementation libs.com.willowtreeapps.assertk
+    androidTestImplementation libs.io.mockk
+    androidTestImplementation libs.io.mockk.android
+    androidTestImplementation libs.io.ktor.client.mock
+    androidTestImplementation libs.org.jetbrains.kotlin.test
+    androidTestImplementation libs.org.jetbrains.kotlin.reflect
+    androidTestImplementation libs.org.jetbrains.kotlinx.coroutine.test
+    androidTestImplementation libs.androidx.test.espresso.core
+    androidTestImplementation libs.androidx.test.uiautomator
+    androidTestImplementation libs.androidx.compose.ui.test.junit4
+    debugImplementation libs.androidx.compose.ui.test.manifest
+}
