@@ -58,7 +58,7 @@ class ExampleUnitTest {
             backgroundScope.launch(testDispatcher) {
                 // Context of the app under test.
                 val appContext = InstrumentationRegistry.getInstrumentation().targetContext
-                assertEquals("io.github.ryunen344.suburi", appContext.packageName)
+                assertEquals("io.github.ryunen344.bus", appContext.packageName)
                 DebugProbes.printScope(this)
             }
             DebugProbes.printScope(backgroundScope)
