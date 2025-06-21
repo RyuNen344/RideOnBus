@@ -254,6 +254,7 @@ dependencies {
     implementation libs.org.jetbrains.kotlinx.serialization.core
     implementation libs.org.jetbrains.kotlinx.serialization.json
     implementation libs.org.jetbrains.kotlinx.serialization.json.okio
+    implementation libs.org.greenrobot.eventbus
     implementation libs.timber
 
     // test
